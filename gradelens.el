@@ -19,12 +19,12 @@
 DDirectory to grade: 
 FFile for grades: 
 ")
-  (with-current-buffer
-      (let ((start-delim (progn (goto-char start) (regexp-quote (thing-at-point 'line))))
-            (end-delim (progn (goto-char end) (regexp-quote (thing-at-point 'line)))))
-        (gradelens-to-org-file (gradelens-group (gradelens-grade-with-delims dir start-delim end-delim)) org))))
+  (let ((start-delim (progn (goto-char start) (regexp-quote (thing-at-point 'line))))
+        (end-delim (progn (goto-char end) (regexp-quote (thing-at-point 'line)))))
+    (gradelens-to-org-file (gradelens-group (gradelens-grade-with-delims dir start-delim end-delim)) org)))
 
 (defun gradelens-how-many (dir start end)
+  "Count how many distinct grades their are"
   (interactive "DDirectory to grade:
 r")
   (length (gradelens-group (gradelens-grade dir start end))))
@@ -39,24 +39,55 @@ r")
   (let ((gf (if (null groupfn) (lambda (x) (secure-hash 'sha256 (plist-get x :answer))) groupfn)))
     (mapcar #'(lambda (x) `(,(car x) . (:answers ,(cdr x)))) (-group-by gf answers))))
 
-(defun gradelens-grade-answer (answer grade)
-  (with-temp-buffer
-    (insert-file-contents (plist-get answer :file))
-    (goto-char (plist-get answer :answer-end))
-    (move-end-of-line nil)
-    (kill-whole-line)
-    (insert grade)
-    (write-file (plist-get answer :file) nil)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Assigning grades.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun gradelens-string-to-number (str)
+  (if (stringp str)
+      (string-to-number str)
+    str))
+
+(defun gradelens-grade-answer (answer default-grade)
+  (let ((grade (or (plist-get answer :grade) default-grade)))
+    (if (null grade) ()
+     (with-temp-buffer
+       (insert-file-contents (plist-get answer :file))
+       (goto-char (gradelens-string-to-number (plist-get answer :answer-end)))
+       (previous-line)
+       (kill-whole-line)
+       (insert grade)
+       (newline)
+       (write-file (plist-get answer :file) nil)))))
+
+(defun gradelens-grade-group (group-alist)
+  "grade a GROUP which is an alist entry"
+  (let* ((group (cdr group-alist))
+         (default-grade (plist-get group :grade)))
+    (mapcar (lambda (ans) (gradelens-grade-answer ans default-grade))
+            (plist-get group :answers))))
+
+(defun gradelens-grade-groups (answer-groups)
+  (mapcar #'gradelens-grade-group answer-groups))
+
+(defun gradelens-write-grades ()
+  (interactive)
+  (let ((groups (gradelens-from-org-buffer)))
+    (gradelens-grade-groups groups)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Convert gradelens dictionary to org.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun gradelens-answer-to-org-data (answer)
   `((headline (:title ,(plist-get answer :file) :level 2)
-    (section nil
-             (property-drawer
-              nil
-              (node-property (:key file :value ,(plist-get answer :file)))
-              (node-property (:key answer-start :value ,(plist-get answer :answer-start)))
-              (node-property (:key answer-end :value   ,(plist-get answer :answer-end))))
-             (src-block (:language "coq" :value ,(plist-get answer :answer)))))))
+              (section nil
+                       (property-drawer
+                        nil
+                        (node-property (:key file :value ,(plist-get answer :file)))
+                        (node-property (:key answer-start :value ,(plist-get answer :answer-start)))
+                        (node-property (:key answer-end :value   ,(plist-get answer :answer-end))))
+                       (src-block (:language "coq" :value ,(plist-get answer :answer)))))))
 
 (defun gradelens-answer-group-to-org-data (answer-group)
   `(headline (:title ,(car answer-group) :level 1)
@@ -74,17 +105,21 @@ r")
     (insert (org-element-interpret-data (gradelens-to-org-data answer-groups)))
     (write-file file)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Convert org to gradelens dictionary
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun gradelens-answer-from-org (org-answer)
   (let* ((section (assoc 'section org-answer))
          (property-drawer (assoc 'property-drawer section))
          (properties (cddr property-drawer))
          (drawer (seq-reduce (lambda (x y)
-                                 (let* ((key (plist-get (cadr y) :key))
-                                        (key-sym (intern-soft (concat ":" key)))
-                                        (val (plist-get (cadr y) :value)))
-                                   (if (null key) x
-                                     (plist-put x key-sym val))))
-                         properties nil))
+                               (let* ((key (plist-get (cadr y) :key))
+                                      (key-sym (intern-soft (concat ":" key)))
+                                      (val (plist-get (cadr y) :value)))
+                                 (if (null key) x
+                                   (plist-put x key-sym val))))
+                             properties nil))
          (src (plist-get (cadr (assoc 'src-block (caddr org-answer))) :value)))
     (plist-put drawer :answer src)))
 
