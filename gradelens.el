@@ -9,10 +9,12 @@
       (if (null start) nil
         (let ((end (search-forward-regexp grade-delim nil t 1)))
           (if (null end) nil
-            (list :file         file
-                  :answer       (buffer-substring-no-properties start end)
-                  :answer-start start
-                  :answer-end   end)))))))
+            (progn (goto-char start)
+                   (forward-line -1)
+                   (list :file         file
+                         :answer       (buffer-substring-no-properties (point) end)
+                         :answer-start (point)
+                         :answer-end   end))))))))
 
 (defun gradelens-grade (start end dir org &optional groupfn)
   (interactive "r
