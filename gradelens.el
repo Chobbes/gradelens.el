@@ -14,14 +14,21 @@
                   :answer-start start
                   :answer-end   end)))))))
 
-(defun gradelens-grade (start end dir org)
+(defun gradelens-grade (start end dir org &optional groupfn)
   (interactive "r
 DDirectory to grade: 
 FFile for grades: 
 ")
   (let ((start-delim (progn (goto-char start) (regexp-quote (thing-at-point 'line))))
         (end-delim (progn (goto-char end) (regexp-quote (thing-at-point 'line)))))
-    (gradelens-to-org-file (gradelens-group (gradelens-grade-with-delims dir start-delim end-delim)) org)))
+    (gradelens-to-org-file (gradelens-group (gradelens-grade-with-delims dir start-delim end-delim) groupfn) org)))
+
+(defun gradelens-grade-ungrouped (start end dir org)
+  (interactive "r
+DDirectory to grade: 
+FFile for grades: 
+")
+  (gradelens-grade start end dir org #'gradelens-dont-groupfn))
 
 (defun gradelens-how-many (dir start end)
   "Count how many distinct grades their are"
@@ -36,8 +43,19 @@ r")
 
 (defun gradelens-group (answers &optional groupfn)
   "Group similar answers together. Default to grouping by hash."
-  (let ((gf (if (null groupfn) (lambda (x) (secure-hash 'sha256 (plist-get x :answer))) groupfn)))
+  (let ((gf (if (null groupfn) #'gradelens-hash-groupfn groupfn)))
     (mapcar #'(lambda (x) `(,(car x) . (:answers ,(cdr x)))) (-group-by gf answers))))
+
+(defun gradelens-hash-groupfn (x)
+  "Hash answer, trim all whitespace"
+  (let* ((answer  (plist-get x :answer))
+         (trim-comments (replace-regexp-in-string "(\\*[^\n\r\v]*\\*\)" "" answer))
+         (trimmed (replace-regexp-in-string "[[:space:]]*" "" trim-comments)))
+    (secure-hash 'sha256 trimmed)))
+
+(defun gradelens-dont-groupfn (x)
+  "Always return the group 'Ungrouped'"
+  "Ungrouped")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Assigning grades.
